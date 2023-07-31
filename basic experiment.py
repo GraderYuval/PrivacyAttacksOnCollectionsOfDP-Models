@@ -1,4 +1,4 @@
-
+import torch
 
 def train_model(epsilon, data):
     """
@@ -7,6 +7,7 @@ def train_model(epsilon, data):
     :param data:
     :return:
     """
+    pass
 
 def train_models(epsilon, n, data):
     """
