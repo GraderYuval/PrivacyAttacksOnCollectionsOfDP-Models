@@ -6,9 +6,18 @@ def train_models(epsilon, n, data):
     :param epsilon:
     :return:
     """
+    pass
 
 def check_average():
     """
     This experiment check the basic attack when take the average of the attack of the models.
     :return:
     """
+    pass
+
+def get_training_set(data):
+    """
+    Extract 50% of the data to be training set.
+    :return:
+    """
+    pass
