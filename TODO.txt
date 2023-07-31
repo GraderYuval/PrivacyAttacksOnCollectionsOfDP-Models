@@ -1,0 +1,3 @@
+1. class for training Epsilon-DP model
+2. class for attacking a DP-model
+3. Run run an attack on N-Epsilon model & N atttacks on Epsilon-DP-model
