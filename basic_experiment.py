@@ -2,95 +2,119 @@ import numpy as np
 from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import torch
+import torchvision
+import torchvision.transforms as transforms
 
 from training import train_model
 from label_attack import attack
 
-NUMBER_OF_SAMPLES = 1000
+class BASIC_EXPERIEMENT:
 
-def train_models(epsilon, n, train_data, test_data):
-    """
-    Train n models to be epsilon-DP, using the same training set for all models.
-    :param epsilon:
-    :return:
-    """
-    models = []
-    for i in range(n):
-        acc, model = train_model(epsilon, train_data, test_data)
-        models.append(model)
-        print("model", i + 1, "accuracy: ", acc)
-    models = [train_model(epsilon, train_data, test_data) for i in range(n)]
-    return models
+    def __init__(self, eps, ensemble_size, evaluate_score, number_of_samples=1000, batch_size=64):
+        self.eps = eps
+        self.number_of_samples = number_of_samples
+        self.ensemble_size = ensemble_size
+        self.batch_size = batch_size
+        self.evaluate_score = evaluate_score
+        self.train_data = None
+        self.test_data = None
+        self.ensemble = []
+        self.evaluate = {"average": self.check_average, "max": self.check_max}
 
-def check_average(models, sample, data):
-    """
-    This experiment check the basic attack when take the average of the attack of the models.
-    :return:
-    """
-    res = [attack(model, sample, data) for model in models]
-    return np.mean(res)
+    def train_models(self):
+        """
+        Train n models to be epsilon-DP, using the same training set for all models.
+        :param epsilon:
+        :return:
+        """
+        for i in range(self.ensemble_size):
+            acc, model = train_model(self.eps, self.train_data, self.test_data)
+            self.ensemble.append(model)
+            print("model", i + 1, "accuracy: ", acc)
 
-def check_max(models, sample, data):
-    res = [attack(model, sample, data) for model in models]
-    return np.max(res)
+    def check_average(self, sample):
+        """
+        This experiment check the basic attack when take the average of the attack of the models.
+        :return:
+        """
+        res = [attack(model, sample, self.train_data) for model in self.ensemble]
+        return np.mean(res)
 
-def get_training_set(data_frame, target_column, test_size=0.5, random_state=None):
-    """
-    Split 50% of the data to be training data, and 50% to be test data.
-    :return: return train_data, test_data.
-    """
-    # Separate the features (input) and target (output) variables
-    features = data_frame.drop(columns=[target_column])
-    target = data_frame[target_column]
+    def check_max(self, sample):
+        res = [attack(model, sample, self.train_data) for model in self.ensemble]
+        return np.max(res)
 
-    # Split the data into training and test sets
-    train_data, test_data, train_target, test_target = train_test_split(
-        features, target, test_size=test_size, random_state=random_state
-    )
+    def get_CIFAR_ten(self):
+        """
+        The function download CIFAR-10 to data loader and split it to training and test data.
+        :return:
+        """
+        # Data transformation to normalize the data and convert to tensors
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-    return train_data, test_data, train_target, test_target
+        # Download CIFAR-10 dataset and apply transformations
+        dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                               download=True, transform=transform)
+
+        # Calculate the size of the dataset
+        total_size = len(dataset)
+        train_size = total_size // 2
+        test_size = total_size - train_size
+
+        # Split the dataset into training and testing sets
+        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+
+        # Create DataLoaders for training and testing data
+        self.train_data = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size,
+                                                      shuffle=True, num_workers=2)
+        self.test_data = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size,
+                                                     shuffle=False, num_workers=2)
+
+    def plot_ROC_curve(self, fpr, tpr):
+        # Compute the AUC (Area Under the Curve)
+        roc_auc = auc(fpr, tpr)
+        # Plot the ROC curve
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr, color='blue', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
+        plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
+        plt.semilogx()
+        plt.semilogy()
+        plt.xlim(1e-5, 1)
+        plt.ylim(1e-5, 1)
+        plt.xlabel('False Positive Rate (FPR)')
+        plt.ylabel('True Positive Rate (TPR)')
+        plt.title('ROC Curve')
+        plt.legend(loc='lower right')
+        plt.savefig("/tmp/fprtpr " + self.evaluate_score + ".png")
+        plt.show()
 
 
-def plot_ROC_curve(fpr, tpr, evaluate_score):
-    # Compute the AUC (Area Under the Curve)
-    roc_auc = auc(fpr, tpr)
-    # Plot the ROC curve
-    plt.figure(figsize=(8, 6))
-    plt.plot(fpr, tpr, color='blue', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
-    plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
-    plt.semilogx()
-    plt.semilogy()
-    plt.xlim(1e-5, 1)
-    plt.ylim(1e-5, 1)
-    plt.xlabel('False Positive Rate (FPR)')
-    plt.ylabel('True Positive Rate (TPR)')
-    plt.title('ROC Curve')
-    plt.legend(loc='lower right')
-    plt.savefig("/tmp/fprtpr " + evaluate_score + ".png")
-    plt.show()
+    def make_experiment(self):
+        """
+        The function make the experiment and produce ROC curve.
+        :return:
+        """
+        sampled_indices = np.random.choice(self.train_data.index, size=self.number_of_samples, replace=False)
+        true_sample = self.train_data.loc[sampled_indices]
+        sampled_indices = np.random.choice(self.test_data.index, size=self.number_of_samples, replace=False)
+        false_sample = self.test_data.loc[sampled_indices]
+        y_true = ([1] * self.number_of_samples) + ([0] * self.number_of_samples)
+        y_score = []
+        for i in range(self.number_of_samples):
+            y_score.append(self.evaluate[self.evaluate_score](self.ensemble, true_sample[i], self.train_data))
 
+        for i in range(self.number_of_samples):
+            y_score.append(self.evaluate[self.evaluate_score](self.ensemble, false_sample[i], self.train_data))
 
-def make_experiment(models, train_data, test_data, evaluate_score):
-    """
-    The function make the experiment and produce ROC curve.
-    :param models:
-    :param train_data:
-    :param test_data:
-    :return:
-    """
-    eval = {"average": check_average, "max": check_max}
-    sampled_indices = np.random.choice(train_data.index, size=NUMBER_OF_SAMPLES, replace=False)
-    true_sample = train_data.loc[sampled_indices]
-    sampled_indices = np.random.choice(test_data.index, size=NUMBER_OF_SAMPLES, replace=False)
-    false_sample = test_data.loc[sampled_indices]
-    y_true = ([1] * NUMBER_OF_SAMPLES) + ([0] * NUMBER_OF_SAMPLES)
-    y_score = []
-    for i in range(NUMBER_OF_SAMPLES):
-        y_score.append(eval[evaluate_score](models, true_sample[i], train_data))
+        fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
+        self.plot_ROC_curve(fpr, tpr)
 
-    for i in range(NUMBER_OF_SAMPLES):
-        y_score.append(eval[evaluate_score](models, false_sample[i], train_data))
-
-    fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
-    plot_ROC_curve(fpr, tpr, evaluate_score)
-
+if __name__ == '__main__':
+    # first experiment. Epsilon = 2, size of the ensemble is 2 and evaluate_score is average.
+    exp1 = BASIC_EXPERIEMENT(2, 2, "average")
+    exp1.get_CIFAR_ten()
+    exp1.train_models()
+    exp1.make_experiment()
