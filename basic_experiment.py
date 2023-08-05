@@ -6,16 +6,17 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 
-from training import train_model
-from label_attack import attack
+from training import train_model, testModel
+# from label_attack import attack
 
 class BASIC_EXPERIEMENT:
 
-    def __init__(self, eps, ensemble_size, evaluate_score, number_of_samples=1000, batch_size=64):
+    def __init__(self, eps, ensemble_size, evaluate_score, number_of_samples=1000, batch_size=512, max_physical_batch_size=128):
         self.eps = eps
         self.number_of_samples = number_of_samples
         self.ensemble_size = ensemble_size
         self.batch_size = batch_size
+        self.max_physical_batch_size = max_physical_batch_size
         self.evaluate_score = evaluate_score
         self.train_data = None
         self.test_data = None
@@ -29,7 +30,8 @@ class BASIC_EXPERIEMENT:
         :return:
         """
         for i in range(self.ensemble_size):
-            acc, model = train_model(self.eps, self.train_data, self.test_data)
+            model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
+            acc = testModel(model, self.test_data)
             self.ensemble.append(model)
             print("model", i + 1, "accuracy: ", acc)
 
@@ -50,28 +52,23 @@ class BASIC_EXPERIEMENT:
         The function download CIFAR-10 to data loader and split it to training and test data.
         :return:
         """
-        # Data transformation to normalize the data and convert to tensors
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
+        CIFAR10_STD_DEV = (0.2023, 0.1994, 0.2010)
 
-        # Download CIFAR-10 dataset and apply transformations
-        dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                               download=True, transform=transform)
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD_DEV), ])
+
+        full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 
         # Calculate the size of the dataset
-        total_size = len(dataset)
+        total_size = len(full_train_dataset)
         train_size = total_size // 2
         test_size = total_size - train_size
 
         # Split the dataset into training and testing sets
-        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+        train_dataset, test_dataset = torch.utils.data.random_split(full_train_dataset, [train_size, test_size])
 
-        # Create DataLoaders for training and testing data
-        self.train_data = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size,
-                                                      shuffle=True, num_workers=2)
-        self.test_data = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size,
-                                                     shuffle=False, num_workers=2)
+        self.train_data = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, )
+        self.test_data = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False, )
 
     def plot_ROC_curve(self, fpr, tpr):
         # Compute the AUC (Area Under the Curve)
