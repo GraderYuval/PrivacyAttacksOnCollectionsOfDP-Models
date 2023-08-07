@@ -1,13 +1,12 @@
 import numpy as np
 from sklearn.metrics import roc_curve, auc
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import torch
 import torchvision
 import torchvision.transforms as transforms
 
 from training import train_model, testModel
-# from label_attack import attack
+from label_attack import MembershipInfernceAttack
 
 class BASIC_EXPERIEMENT:
 
@@ -21,6 +20,7 @@ class BASIC_EXPERIEMENT:
         self.train_data = None
         self.test_data = None
         self.ensemble = []
+        self.ensemble_attacks = []
         self.evaluate = {"average": self.check_average, "max": self.check_max}
 
     def train_models(self):
@@ -31,20 +31,30 @@ class BASIC_EXPERIEMENT:
         """
         for i in range(self.ensemble_size):
             model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
-            acc = testModel(model, self.test_data)
             self.ensemble.append(model)
-            print("model", i + 1, "accuracy: ", acc)
+            # acc = testModel(model, self.test_data)
+            # print("model", i + 1, "accuracy: ", acc)
+
+    def prepare_attack(self):
+        for model in self.ensemble:
+            attack = MembershipInfernceAttack(model)
+            attack.fit()
+            self.ensemble_attacks.append(attack)
 
     def check_average(self, sample):
         """
         This experiment check the basic attack when take the average of the attack of the models.
         :return:
         """
-        res = [attack(model, sample, self.train_data) for model in self.ensemble]
+        res = []
+        for i in range(len(self.ensemble)):
+            self.ensemble_attacks[i].attack(sample)
         return np.mean(res)
 
     def check_max(self, sample):
-        res = [attack(model, sample, self.train_data) for model in self.ensemble]
+        res = []
+        for i in range(len(self.ensemble)):
+            self.ensemble_attacks[i].attack(sample)
         return np.max(res)
 
     def get_CIFAR_ten(self):
@@ -67,7 +77,7 @@ class BASIC_EXPERIEMENT:
         # Split the dataset into training and testing sets
         train_dataset, test_dataset = torch.utils.data.random_split(full_train_dataset, [train_size, test_size])
 
-        self.train_data = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, )
+        self.train_data = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size)
         self.test_data = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False, )
 
     def plot_ROC_curve(self, fpr, tpr):
@@ -94,18 +104,18 @@ class BASIC_EXPERIEMENT:
         The function make the experiment and produce ROC curve.
         :return:
         """
-        sampled_indices = np.random.choice(self.train_data.index, size=self.number_of_samples, replace=False)
-        true_sample = self.train_data.loc[sampled_indices]
-        sampled_indices = np.random.choice(self.test_data.index, size=self.number_of_samples, replace=False)
-        false_sample = self.test_data.loc[sampled_indices]
+        train_data = torch.utils.data.DataLoader(self.train_data, batch_size=1, shuffle=True)
+        test_data = torch.utils.data.DataLoader(self.test_data, batch_size=1, shuffle=True)
+        it_true = iter(train_data)
+        it_false = iter(test_data)
         y_true = ([1] * self.number_of_samples) + ([0] * self.number_of_samples)
         y_score = []
         for i in range(self.number_of_samples):
-            y_score.append(self.evaluate[self.evaluate_score](self.ensemble, true_sample[i], self.train_data))
+            print(next(it_true))
+            y_score.append(self.evaluate[self.evaluate_score](next(it_true)))
 
         for i in range(self.number_of_samples):
-            y_score.append(self.evaluate[self.evaluate_score](self.ensemble, false_sample[i], self.train_data))
-
+            y_score.append(self.evaluate[self.evaluate_score](next(it_false)))
         fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
         self.plot_ROC_curve(fpr, tpr)
 
@@ -113,5 +123,9 @@ if __name__ == '__main__':
     # first experiment. Epsilon = 2, size of the ensemble is 2 and evaluate_score is average.
     exp1 = BASIC_EXPERIEMENT(2, 2, "average")
     exp1.get_CIFAR_ten()
+    print("train\n")
     exp1.train_models()
+    print("prepare attack\n")
+    exp1.prepare_attack()
+    print("attack\n")
     exp1.make_experiment()

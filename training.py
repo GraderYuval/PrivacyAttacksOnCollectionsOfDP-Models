@@ -12,7 +12,7 @@ from opacus import PrivacyEngine
 MAX_GRAD_NORM = 1.2
 EPSILON = 50.0
 DELTA = 1e-5
-EPOCHS = 20
+EPOCHS = 2
 LR = 1e-3
 
 
@@ -95,7 +95,7 @@ def train(model, train_loader, optimizer, epoch, device, privacy_engine, batch_s
 
             losses.append(loss.item())
             top1_acc.append(acc)
-
+            torch.cuda.empty_cache()
             loss.backward()
             optimizer.step()
 
