@@ -29,15 +29,17 @@ class BASIC_EXPERIEMENT:
         :param epsilon:
         :return:
         """
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         for i in range(self.ensemble_size):
             model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
             self.ensemble.append(model)
-            # acc = testModel(model, self.test_data)
-            # print("model", i + 1, "accuracy: ", acc)
+            acc = testModel(model, self.test_data, device)
+            print("model", i + 1, "accuracy: ", acc)
 
     def prepare_attack(self):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         for model in self.ensemble:
-            attack = MembershipInfernceAttack(model)
+            attack = MembershipInfernceAttack(model, device)
             attack.fit()
             self.ensemble_attacks.append(attack)
 
