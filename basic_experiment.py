@@ -39,12 +39,12 @@ class BASIC_EXPERIEMENT:
         for i in range(self.ensemble_size):
             model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
             self.ensemble.append(model)
-            acc = testModel(model)
+            acc = testModel(model, self.test_data, device=device)
 
             # new_model = torchvision.models.resnet18(pretrained=True)
             # new_model.load_state_dict(model.state_dict())
             # self.ensemble.append(new_model)
-            # acc = testModel(new_model)
+            # acc = testModel(new_model, self.test_data, device=device)
 
             print("model", i + 1, "accuracy: ", acc)
 

@@ -34,9 +34,9 @@ def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_s
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, )
 
     # Model handel
-    model = models.resnet18(num_classes=10, pretrained=True)
+    model = models.resnet18(num_classes=10)
     if modelName == "resnet18":
-        model = models.resnet18(num_classes=10, pretrained=True)
+        model = models.resnet18(num_classes=10)
 
     model = ModuleValidator.fix(model)
     print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
