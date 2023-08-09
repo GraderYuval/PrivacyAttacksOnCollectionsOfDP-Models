@@ -37,7 +37,7 @@ class BASIC_EXPERIEMENT:
         """
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         for i in range(self.ensemble_size):
-            model = copy.deepcopy(train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size))
+            model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
             new_model = torchvision.models.resnet18(num_classes=10, pretrained=True)
             new_model.load_state_dict(model.state_dict())
             self.ensemble.append(new_model)
