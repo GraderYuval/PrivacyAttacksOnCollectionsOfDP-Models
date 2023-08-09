@@ -40,10 +40,12 @@ class BASIC_EXPERIEMENT:
             model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
             self.ensemble.append(model)
             acc = testModel(model)
+
             # new_model = torchvision.models.resnet18(pretrained=True)
             # new_model.load_state_dict(model.state_dict())
             # self.ensemble.append(new_model)
             # acc = testModel(new_model)
+
             print("model", i + 1, "accuracy: ", acc)
 
     def prepare_attack(self):
