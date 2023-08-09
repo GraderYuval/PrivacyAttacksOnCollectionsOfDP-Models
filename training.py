@@ -12,7 +12,7 @@ from opacus import PrivacyEngine
 MAX_GRAD_NORM = 1.2
 EPSILON = 50.0
 DELTA = 1e-5
-EPOCHS = 2
+EPOCHS = 1
 LR = 1e-3
 
 
@@ -34,9 +34,9 @@ def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_s
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, )
 
     # Model handel
-    model = models.resnet18(num_classes=10)
+    model = models.resnet18(num_classes=10, pretrained=True)
     if modelName == "resnet18":
-        model = models.resnet18(num_classes=10)
+        model = models.resnet18(num_classes=10, pretrained=True)
 
     model = ModuleValidator.fix(model)
     print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
