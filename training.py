@@ -12,7 +12,7 @@ from opacus import PrivacyEngine
 MAX_GRAD_NORM = 1.2
 EPSILON = 50.0
 DELTA = 1e-5
-EPOCHS = 1
+EPOCHS = 50
 LR = 1e-3
 
 

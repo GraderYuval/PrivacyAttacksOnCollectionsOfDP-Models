@@ -1,26 +1,23 @@
-import random
-
 import numpy as np
 from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import torch
 import torchvision
 import torchvision.transforms as transforms
-import copy
-
+from opacus.validators import ModuleValidator
+from train_no_dp import train_no_dp, test_model_no_dp
 from training import train_model, testModel
 from label_attack import MembershipInfernceAttack
 
 class BASIC_EXPERIEMENT:
 
-    def __init__(self, eps, ensemble_size, evaluate_score, number_of_samples=1000, batch_size=128,
+    def __init__(self, eps, ensemble_size, number_of_samples=1000, batch_size=128,
                  max_physical_batch_size=128):
         self.eps = eps
         self.number_of_samples = number_of_samples
         self.ensemble_size = ensemble_size
         self.batch_size = batch_size
         self.max_physical_batch_size = max_physical_batch_size
-        self.evaluate_score = evaluate_score
         self.train_data = None
         self.test_data = None
         self.train_dataset = None
@@ -28,6 +25,7 @@ class BASIC_EXPERIEMENT:
         self.ensemble = []
         self.ensemble_attacks = []
         self.evaluate = {"average": self.check_average, "max": self.check_max}
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def train_models(self):
         """
@@ -35,23 +33,31 @@ class BASIC_EXPERIEMENT:
         :param epsilon:
         :return:
         """
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         for i in range(self.ensemble_size):
-            model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
-            self.ensemble.append(model)
-            acc = testModel(model, self.test_data, device=device)
+            # train with DP
+            # model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
+            # self.ensemble.append(model)
+            # acc = testModel(model, self.test_data, device=self.device)
 
-            # new_model = torchvision.models.resnet18(pretrained=True)
+            # clone model
+            # new_model = torchvision.models.resnet18(num_classes=10)
+            # new_model.to(self.device)
+            # new_model = ModuleValidator.fix(model)
+            # print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
             # new_model.load_state_dict(model.state_dict())
             # self.ensemble.append(new_model)
-            # acc = testModel(new_model, self.test_data, device=device)
+            # acc = testModel(new_model, self.test_data, device=self.device)
+
+            # train without DP
+            model = train_no_dp(self.train_data, self.device)
+            self.ensemble.append(model)
+            acc = test_model_no_dp(model, self.test_data, self.device)
 
             print("model", i + 1, "accuracy: ", acc)
 
     def prepare_attack(self):
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         for model in self.ensemble:
-            attack = MembershipInfernceAttack(model, device)
+            attack = MembershipInfernceAttack(model, self.device)
             attack.fit(True)
             self.ensemble_attacks.append(attack)
 
@@ -96,7 +102,7 @@ class BASIC_EXPERIEMENT:
         self.test_data = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, )
 
 
-    def plot_ROC_curve(self, fpr, tpr):
+    def plot_ROC_curve(self, fpr, tpr, evaluate_score):
         # Compute the AUC (Area Under the Curve)
         roc_auc = auc(fpr, tpr)
         # Plot the ROC curve
@@ -111,11 +117,11 @@ class BASIC_EXPERIEMENT:
         plt.ylabel('True Positive Rate (TPR)')
         plt.title('ROC Curve')
         plt.legend(loc='lower right')
-        plt.savefig("fprtpr_" + self.evaluate_score + ".png")
+        plt.savefig("fprtpr_" + evaluate_score + "_size_of_ensemble_" + str(self.ensemble_size) + ".png")
         plt.show()
 
 
-    def make_experiment(self):
+    def make_experiment(self, evaluate_score):
         """
         The function make the experiment and produce ROC curve.
         :return:
@@ -124,21 +130,22 @@ class BASIC_EXPERIEMENT:
         y_score = []
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
-            y_score.append(self.evaluate[self.evaluate_score](x_sample, y_sample))
+            y_score.append(self.evaluate[evaluate_score](x_sample, y_sample))
 
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
-            y_score.append(self.evaluate[self.evaluate_score](x_sample, y_sample))
+            y_score.append(self.evaluate[evaluate_score](x_sample, y_sample))
         fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
-        self.plot_ROC_curve(fpr, tpr)
+        self.plot_ROC_curve(fpr, tpr, evaluate_score)
 
 if __name__ == '__main__':
-    # first experiment. Epsilon = 2, size of the ensemble is 2 and evaluate_score is average.
-    exp1 = BASIC_EXPERIEMENT(2, 2, "average")
-    exp1.get_CIFAR_ten()
-    print("train\n")
-    exp1.train_models()
-    print("prepare attack\n")
-    exp1.prepare_attack()
-    print("attack\n")
-    exp1.make_experiment()
+    for i in range(2, 11):
+        exp = BASIC_EXPERIEMENT(2, i)
+        exp.get_CIFAR_ten()
+        print("train ", i, "\n")
+        exp.train_models()
+        print("prepare attack ", i, "\n")
+        exp.prepare_attack()
+        print("attack ", i, "\n")
+        exp.make_experiment("average")
+        exp.make_experiment("max")
