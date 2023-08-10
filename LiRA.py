@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.stats import norm
 
 from training import train_model
 
@@ -81,3 +82,4 @@ class LiRA:
         model_confs = model_confs[0][self.label].item()
         model_confs = np.log(model_confs / (1 - model_confs))
         # return likelihood ratio test
+        return norm.dpf(model_confs, mean_in, var_in) / (norm.pdf(model_confs, mean_out, var_out))
