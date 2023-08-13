@@ -68,13 +68,13 @@ class BASIC_EXPERIEMENT:
         """
         res = []
         for i in range(len(self.ensemble)):
-            self.ensemble_attacks[i].attack(x_sample, y_sample)
+            res.append(self.ensemble_attacks[i].attack(x_sample, y_sample))
         return np.mean(res)
 
     def check_max(self, x_sample, y_sample):
         res = []
         for i in range(len(self.ensemble)):
-            self.ensemble_attacks[i].attack(x_sample, y_sample)
+            res.append(self.ensemble_attacks[i].attack(x_sample, y_sample))
         return np.max(res)
 
     def get_CIFAR_ten(self):
@@ -130,17 +130,17 @@ class BASIC_EXPERIEMENT:
         y_score = []
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
-            y_score.append(self.evaluate[evaluate_score](x_sample, y_sample))
+            y_score.append(self.evaluate[evaluate_score](x_sample, np.ndarray(y_sample, dtype=float)))
 
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
-            y_score.append(self.evaluate[evaluate_score](x_sample, y_sample))
+            y_score.append(self.evaluate[evaluate_score](x_sample, np.ndarray(y_sample, dtype=float)))
         fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
         self.plot_ROC_curve(fpr, tpr, evaluate_score)
 
 if __name__ == '__main__':
     for i in range(2, 11):
-        exp = BASIC_EXPERIEMENT(2, i)
+        exp = BASIC_EXPERIEMENT(8, i)
         exp.get_CIFAR_ten()
         print("train ", i, "\n")
         exp.train_models()
