@@ -12,8 +12,8 @@ from opacus import PrivacyEngine
 MAX_GRAD_NORM = 1.2
 EPSILON = 50.0
 DELTA = 1e-5
-EPOCHS = 50
-LR = 1e-3
+EPOCHS = 20
+LR = 0.001
 
 
 def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_size=128, modelName="resnet18"):
@@ -45,7 +45,7 @@ def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_s
     print(f"running training on device: {device}")
     model = model.to(device)
 
-    optimizer = optim.RMSprop(model.parameters(), lr=LR)  # consider changing to adam
+    optimizer = optim.Adam(model.parameters(), lr=LR)  # consider changing to adam
 
     privacy_engine = PrivacyEngine()
     model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
@@ -71,6 +71,7 @@ def train(model, train_loader, optimizer, epoch, device, privacy_engine, batch_s
 
     losses = []
     top1_acc = []
+    torch.cuda.empty_cache()
 
     with BatchMemoryManager(
             data_loader=train_loader,
