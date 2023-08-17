@@ -1,8 +1,8 @@
 # Required Libraries
 import torch
 from opacus.validators import ModuleValidator
-# from torchvision import models
-import models
+from torchvision import models
+# import models
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -21,6 +21,7 @@ def create_model(modelName="resnet18"):
     model = models.resnet18(num_classes=10)
     if modelName == "resnet18":
         model = models.resnet18(num_classes=10)
+
     model = ModuleValidator.fix(model)
     print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

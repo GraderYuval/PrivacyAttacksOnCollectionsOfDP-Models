@@ -1,21 +1,24 @@
-import numpy as np
-from sklearn.metrics import roc_curve, auc
+import json
+
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from opacus.validators import ModuleValidator
-from train_no_dp import train_no_dp, test_model_no_dp
-from training import train_model, testModel
+from sklearn.metrics import roc_curve, auc
+
 from label_attack import MembershipInfernceAttack
+from training import train_model, testModel
+import os
+
 
 class BASIC_EXPERIEMENT:
 
     def __init__(self, eps, ensemble_size, number_of_samples=1000, batch_size=128,
                  max_physical_batch_size=128):
         self.eps = eps
-        self.number_of_samples = number_of_samples
         self.ensemble_size = ensemble_size
+        self.number_of_samples = number_of_samples
         self.batch_size = batch_size
         self.max_physical_batch_size = max_physical_batch_size
         self.train_data = None
@@ -26,6 +29,7 @@ class BASIC_EXPERIEMENT:
         self.ensemble_attacks = []
         self.evaluate = {"average": self.check_average, "max": self.check_max}
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.split_seed = np.random.randint(0, 2 ** 31 - 1)
 
     def train_models(self):
         """
@@ -33,26 +37,26 @@ class BASIC_EXPERIEMENT:
         :param epsilon:
         :return:
         """
+        model_name = "resnet18"
+        data_name = "CIFAR10"
+
         for i in range(self.ensemble_size):
-            # train with DP
-            # model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size)
-            # self.ensemble.append(model)
-            # acc = testModel(model, self.test_data, device=self.device)
+            identifier = self.generate_model_identifier(self.eps, self.ensemble_size, self.batch_size, model_name, data_name)
 
-            # clone model
-            # new_model = torchvision.models.resnet18(num_classes=10)
-            # new_model.to(self.device)
-            # new_model = ModuleValidator.fix(model)
-            # print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
-            # new_model.load_state_dict(model.state_dict())
-            # self.ensemble.append(new_model)
-            # acc = testModel(new_model, self.test_data, device=self.device)
+            if self.model_exists(identifier, i):
+                # Load model and config
+                model = self.load_model_weights(train_model(self.eps, None, None, None, modelName=model_name), identifier, i)
 
-            # train without DP
-            model = train_no_dp(self.train_data, self.device)
+            else:
+                # Train model
+                model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size, modelName=model_name)
+                self.save_model_weights(model, identifier, i)
+                self.save_config(f"./saved_models/{identifier}_config.json")
+
+            self.load_config(f"./saved_models/{identifier}_config.json")
             self.ensemble.append(model)
-            acc = test_model_no_dp(model, self.test_data, self.device)
 
+            acc = testModel(model, self.test_data, device=self.device)
             print("model", i + 1, "accuracy: ", acc)
 
     def prepare_attack(self):
@@ -82,6 +86,12 @@ class BASIC_EXPERIEMENT:
         The function download CIFAR-10 to data loader and split it to training and test data.
         :return:
         """
+        if hasattr(self, 'split_seed'):
+            torch.manual_seed(self.split_seed)
+            np.random.seed(self.split_seed)
+        else:
+            raise ValueError("No split_seed available!")
+
         CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
         CIFAR10_STD_DEV = (0.2023, 0.1994, 0.2010)
 
@@ -95,12 +105,10 @@ class BASIC_EXPERIEMENT:
         test_size = total_size - train_size
 
         # Split the dataset into training and testing sets
-        self.train_dataset, self.test_dataset = \
-            torch.utils.data.random_split(full_train_dataset, [train_size, test_size])
+        self.train_dataset, self.test_dataset = torch.utils.data.random_split(full_train_dataset, [train_size, test_size])
 
         self.train_data = torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size)
         self.test_data = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, )
-
 
     def plot_ROC_curve(self, fpr, tpr, evaluate_score):
         # Compute the AUC (Area Under the Curve)
@@ -120,7 +128,6 @@ class BASIC_EXPERIEMENT:
         plt.savefig("fprtpr_" + evaluate_score + "_size_of_ensemble_" + str(self.ensemble_size) + ".png")
         plt.show()
 
-
     def make_experiment(self, evaluate_score):
         """
         The function make the experiment and produce ROC curve.
@@ -139,14 +146,62 @@ class BASIC_EXPERIEMENT:
         fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
         self.plot_ROC_curve(fpr, tpr, evaluate_score)
 
+    def save_config(self, path):
+        config = {
+            'eps': self.eps,
+            'number_of_samples': self.number_of_samples,
+            'ensemble_size': self.ensemble_size,
+            'batch_size': self.batch_size,
+            'max_physical_batch_size': self.max_physical_batch_size,
+            'split_seed': self.split_seed
+        }
+        with open(path, 'w') as f:
+            json.dump(config, f)
+
+    def load_config(self, path):
+        with open(path, 'r') as f:
+            config = json.load(f)
+        for key, value in config.items():
+            setattr(self, key, value)
+
+    def generate_model_identifier(self, eps, ensemble_size, batch_size, model_name, data_name):
+        return f"model_{model_name}_data_{data_name}_eps_{eps}_ensemble_{ensemble_size}_batch_{batch_size}"
+
+    def save_model_weights(self, model, identifier, idx):
+        path = f"./saved_models/{identifier}_model_{idx}.pth"
+        torch.save(model.state_dict(), path)
+
+    def load_model_weights(self, model, identifier, idx):
+        path = f"./saved_models/{identifier}_model_{idx}.pth"
+        model.load_state_dict(torch.load(path))
+        model.eval()  # Set model to evaluation mode
+        return model
+
+    def model_exists(self, identifier, idx):
+        return os.path.exists(f"./saved_models/{identifier}_model_{idx}.pth")
+
+
+def run_experiment(eps, ensemble_size):
+    exp = BASIC_EXPERIEMENT(eps=eps, ensemble_size=ensemble_size)
+
+    exp.get_CIFAR_ten()
+    print("train ", ensemble_size, "\n")
+
+    exp.train_models()
+    print("prepare attack ", ensemble_size, "\n")
+
+    exp.prepare_attack()
+    print("attack ", ensemble_size, "\n")
+    exp.make_experiment("average")
+    exp.make_experiment("max")
+
+
 if __name__ == '__main__':
-    for i in range(2, 11):
-        exp = BASIC_EXPERIEMENT(8, i)
-        exp.get_CIFAR_ten()
-        print("train ", i, "\n")
-        exp.train_models()
-        print("prepare attack ", i, "\n")
-        exp.prepare_attack()
-        print("attack ", i, "\n")
-        exp.make_experiment("average")
-        exp.make_experiment("max")
+    epsilon = 8
+    n = 2
+
+    # Train and attack: 2*epsilon-DP model
+    run_experiment(epsilon, 1)
+
+    # Train and attack ensemble of 2: epsilon-DP model
+    run_experiment(epsilon / 2, n)
