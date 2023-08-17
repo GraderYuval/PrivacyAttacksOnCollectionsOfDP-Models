@@ -7,7 +7,8 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from opacus.utils.batch_memory_manager import BatchMemoryManager
-from tqdm.notebook import tqdm
+# from tqdm.notebook import tqdm
+from tqdm import tqdm
 from opacus import PrivacyEngine
 
 MAX_GRAD_NORM = 1.2
@@ -16,6 +17,16 @@ DELTA = 1e-5
 EPOCHS = 10
 LR = 0.001
 
+def create_model(modelName="resnet18"):
+    model = models.resnet18(num_classes=10)
+    if modelName == "resnet18":
+        model = models.resnet18(num_classes=10)
+    model = ModuleValidator.fix(model)
+    print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"running training on device: {device}")
+    model = model.to(device)
+    return model
 
 def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_size=128, modelName="resnet18"):
     """
@@ -35,16 +46,9 @@ def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_s
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, )
 
     # Model handel
-    model = models.SimpleCNN0(n_classes=10)
-    if modelName == "resnet18":
-        model = models.SimpleCNN0(n_classes=10)
 
-    model = ModuleValidator.fix(model)
-    print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model
-
+    model = create_model(modelName=modelName)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"running training on device: {device}")
-    model = model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=LR)  # consider changing to adam
 
@@ -59,9 +63,10 @@ def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_s
         max_grad_norm=MAX_GRAD_NORM,
     )
 
-    for epoch in tqdm(range(EPOCHS), desc="Epoch", unit="epoch"):
+    for epoch in tqdm(range(EPOCHS)):#, desc="Epoch", unit="epoch"):
         train(model, train_loader, optimizer, epoch + 1, device, privacy_engine, batch_size, max_physical_batch_size)
 
+    del privacy_engine
     print(f"Using sigma={optimizer.noise_multiplier} and C={MAX_GRAD_NORM}")
     return model
 

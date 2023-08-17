@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from training import train_model, testModel
+from training import train_model, testModel, create_model
 from LiRA import LiRA
-
+import os
 
 class BASIC_EXPERIEMENT:
 
@@ -22,6 +22,8 @@ class BASIC_EXPERIEMENT:
         self.test_dataset = None
         self.ensemble = []
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.ckpt_dir = "./models"
+        self.load_checkpoint = True
 
     def train_models(self):
         """
@@ -31,14 +33,26 @@ class BASIC_EXPERIEMENT:
         """
         train_data = torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size)
         test_data = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, )
+        ensemble_ckpt_dir = os.path.join(self.ckpt_dir, f"ensemble_{self.ensemble_size}")
+        os.makedirs(ensemble_ckpt_dir, exist_ok=True)
+
         for i in range(self.ensemble_size):
             # train with DP
-            model = train_model(self.eps, train_data, self.batch_size, self.max_physical_batch_size)
+            model_ckpt_path = os.path.join(ensemble_ckpt_dir, f"model_{i}.pt")
+            if os.path.isfile(model_ckpt_path) and self.load_checkpoint:
+                model = create_model()
+                load_dict = torch.load(model_ckpt_path)
+                model.load_state_dict(load_dict)
+            else:
+                model = train_model(self.eps, train_data, self.batch_size, self.max_physical_batch_size)
+                torch.save(model._module.state_dict(), model_ckpt_path)
+            # model.to('cpu')
+            self.ensemble.append(model)
+        
+        for model in self.ensemble:
             acc = testModel(model, test_data, device=self.device)
             print("model", i + 1, "accuracy: ", acc)
-            model = model.to('cpu')
-            self.ensemble.append(model)
-            torch.cuda.empty_cache()
+            model.to("cuda")
 
     def check_attack(self, index):
         """
@@ -76,6 +90,8 @@ class BASIC_EXPERIEMENT:
         self.train_dataset, self.test_dataset = \
             torch.utils.data.random_split(full_train_dataset, [train_size, test_size])
 
+
+        aa=32
     def plot_ROC_curve(self, fpr, tpr, evaluate_score):
         # Compute the AUC (Area Under the Curve)
         roc_auc = auc(fpr, tpr)
@@ -124,11 +140,12 @@ class BASIC_EXPERIEMENT:
 
 
 if __name__ == '__main__':
-    for i in range(2, 11):
-        torch.cuda.empty_cache()
-        exp = BASIC_EXPERIEMENT(8, i, number_of_samples=5)
-        exp.get_CIFAR_ten()
-        print("train ", i, "\n")
-        exp.train_models()
-        print("attack ", i, "\n")
-        exp.make_experiment()
+    # for i in range(2, 11):
+    i=6
+    exp = BASIC_EXPERIEMENT(8, i, number_of_samples=100)
+    exp.get_CIFAR_ten()
+    print("train ", i, "\n")
+    exp.train_models()
+    print("attack ", i, "\n")
+    exp.make_experiment("average")
+    exp.make_experiment("max")
