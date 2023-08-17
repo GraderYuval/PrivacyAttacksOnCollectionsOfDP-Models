@@ -1,7 +1,8 @@
 # Required Libraries
 import torch
 from opacus.validators import ModuleValidator
-from torchvision import models
+# from torchvision import models
+import models
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -12,7 +13,7 @@ from opacus import PrivacyEngine
 MAX_GRAD_NORM = 1.2
 EPSILON = 50.0
 DELTA = 1e-5
-EPOCHS = 20
+EPOCHS = 10
 LR = 0.001
 
 
@@ -34,9 +35,9 @@ def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_s
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, )
 
     # Model handel
-    model = models.resnet18(num_classes=10)
+    model = models.SimpleCNN0(n_classes=10)
     if modelName == "resnet18":
-        model = models.resnet18(num_classes=10)
+        model = models.SimpleCNN0(n_classes=10)
 
     model = ModuleValidator.fix(model)
     print(ModuleValidator.validate(model, strict=False))  # validate no errors in the model

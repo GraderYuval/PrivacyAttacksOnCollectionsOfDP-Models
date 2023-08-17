@@ -10,7 +10,7 @@ from LiRA import LiRA
 
 class BASIC_EXPERIEMENT:
 
-    def __init__(self, eps, ensemble_size, number_of_samples=100, batch_size=64,
+    def __init__(self, eps, ensemble_size, number_of_samples=25, batch_size=64,
                  max_physical_batch_size=128):
         self.eps = eps
         self.number_of_samples = number_of_samples
@@ -21,7 +21,6 @@ class BASIC_EXPERIEMENT:
         self.train_dataset = None
         self.test_dataset = None
         self.ensemble = []
-        self.evaluate = {"average": self.check_average, "max": self.check_max}
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def train_models(self):
@@ -35,39 +34,25 @@ class BASIC_EXPERIEMENT:
         for i in range(self.ensemble_size):
             # train with DP
             model = train_model(self.eps, train_data, self.batch_size, self.max_physical_batch_size)
-            self.ensemble.append(model)
             acc = testModel(model, test_data, device=self.device)
             print("model", i + 1, "accuracy: ", acc)
-            model.to('cpu')
+            model = model.to('cpu')
+            self.ensemble.append(model)
+            torch.cuda.empty_cache()
 
-    def check_average(self, index, ):
+    def check_attack(self, index):
         """
         This experiment check LiRA attack when take the average of the attack of the models.
         :return:
         """
         res = []
+        lira = LiRA(self.eps, self.full_train_dataset, index, self.device, N=16, batch_size=self.batch_size)
+        lira.prepare_attack()
         for i in range(len(self.ensemble)):
-            lira = LiRA(self.eps, self.full_train_dataset, index, self.ensemble[i], self.device, N=32,
-                        batch_size=self.batch_size)
-            ret = lira.attack()
+            ret = lira.attack(self.ensemble[i])
             res.append(ret)
 
-        return np.mean(res)
-
-    def check_max(self, index):
-        """
-        This experiment check LiRA attack when take the max of the attack of the models.
-        :param index:
-        :return:
-        """
-        res = []
-        for i in range(len(self.ensemble)):
-            lira = LiRA(self.eps, self.full_train_dataset, index, self.ensemble[i], self.device, N=32,
-                        batch_size=self.batch_size)
-            ret = lira.attack()
-            res.append(ret)
-
-        return np.max(res)
+        return np.mean(res), np.max(res)
 
     def get_CIFAR_ten(self):
         """
@@ -106,36 +91,44 @@ class BASIC_EXPERIEMENT:
         plt.ylabel('True Positive Rate (TPR)')
         plt.title('ROC Curve')
         plt.legend(loc='lower right')
-        plt.savefig("fprtpr_" + evaluate_score + "_size_of_ensemble_" + str(self.ensemble_size) + "_eps_" +
+        plt.savefig("changed_" + evaluate_score + "_size_of_ensemble_" + str(self.ensemble_size) + "_eps_" +
                     str(self.eps) + ".png")
         plt.show()
 
-    def make_experiment(self, evaluate_score):
+    def make_experiment(self):
         """
         The function make the experiment and produce ROC curve.
         :return:
         """
         y_true = ([1] * self.number_of_samples) + ([0] * self.number_of_samples)
-        y_score = []
+        y_average = []
+        y_max = []
         for i in range(self.number_of_samples):
             index = torch.randint(len(self.train_dataset), size=(1,))
             index = self.train_dataset.indices[index]
-            y_score.append(self.evaluate[evaluate_score](index))
+            average, m = self.check_attack(index)
+            y_average.append(average)
+            y_max.append(m)
+
         for i in range(self.number_of_samples):
             index = torch.randint(len(self.test_dataset), size=(1,))
             index = self.test_dataset.indices[index]
-            y_score.append(self.evaluate[evaluate_score](index))
+            average, m = self.check_attack(index)
+            y_average.append(average)
+            y_max.append(m)
 
-        fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
-        self.plot_ROC_curve(fpr, tpr, evaluate_score)
+        fpr, tpr, thresholds = roc_curve(y_true, y_average, pos_label=1)
+        print("param: ", self.ensemble_size, "\t", fpr, tpr, thresholds, "\n", y_average, "\n", y_max, "\n")
+        self.plot_ROC_curve(fpr, tpr, "average")
+        self.plot_ROC_curve(fpr, tpr, "max")
 
 
 if __name__ == '__main__':
     for i in range(2, 11):
-        exp = BASIC_EXPERIEMENT(8, i, number_of_samples=100)
+        torch.cuda.empty_cache()
+        exp = BASIC_EXPERIEMENT(8, i, number_of_samples=5)
         exp.get_CIFAR_ten()
         print("train ", i, "\n")
         exp.train_models()
         print("attack ", i, "\n")
-        exp.make_experiment("average")
-        exp.make_experiment("max")
+        exp.make_experiment()

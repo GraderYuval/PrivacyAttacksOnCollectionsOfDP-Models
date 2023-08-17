@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
-EPOCHS = 50
+EPOCHS = 20
 LR = 0.001
 
 def accuracy(preds, labels):

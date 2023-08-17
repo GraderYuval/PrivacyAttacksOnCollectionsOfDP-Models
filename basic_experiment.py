@@ -135,6 +135,7 @@ class BASIC_EXPERIEMENT:
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
             y_score.append(self.evaluate[evaluate_score](x_sample, np.ndarray(y_sample, dtype=float)))
+        print(self.ensemble_size, "\t", y_score)
         fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
         self.plot_ROC_curve(fpr, tpr, evaluate_score)
 

@@ -7,7 +7,7 @@ import copy
 from training import train_model
 
 class LiRA:
-    def __init__(self, eps, dataset, sample_index, model, device, N=32, batch_size=64):
+    def __init__(self, eps, dataset, sample_index, device, N=16, batch_size=64):
         """
         :param eps: epsilon DP of the shadow models.
         :param data:
@@ -22,7 +22,6 @@ class LiRA:
         self.sample = np.array([self.sample])
         self.sample = np.append(self.sample, self.sample, axis=0)
 
-        self.model = model
         self.device = device
         self.N = N
         self.batch_size = batch_size
@@ -71,7 +70,7 @@ class LiRA:
         out_model.eval()
         sample_tensor = torch.tensor(self.sample, dtype=torch.float32)
         sample_tensor = torch.permute(sample_tensor, (0, 3, 1, 2))
-        sample_tensor.to('cpu')
+        sample_tensor = sample_tensor.to('cpu')
         with torch.no_grad():
             # not sure if it's true
             in_p = in_model(sample_tensor)
@@ -82,17 +81,19 @@ class LiRA:
         out_p = out_p[0][self.label].item()
         # need to think what to do when in_p or out_p equal to 1
         if in_p == 1:
-            in_p = 0.9999999999
-        self.confs_in.append(np.log(in_p / (1 - in_p)))
+            self.confs_in.append(36.7368005696771)
+        elif in_p == 0:
+            self.confs_in.append(-36.841361487904734)
+        else:
+            self.confs_in.append(np.log(in_p / (1 - in_p)))
         if out_p == 1:
-            out_p = 0.9999999999
-        self.confs_out.append(np.log(out_p / (1 - out_p)))
+            self.confs_out.append(36.7368005696771)
+        elif out_p == 0:
+            self.confs_out.append(-36.841361487904734)
+        else:
+            self.confs_out.append(np.log(out_p / (1 - out_p)))
 
-    def attack(self):
-        """
-        The function implement LiRA attack.
-        :return:
-        """
+    def prepare_attack(self):
         for i in range(self.N):
             # get training data
             in_data, out_data = self.get_in_out_training_data()
@@ -100,14 +101,22 @@ class LiRA:
             # train in/out shadow models
             torch.cuda.empty_cache()
             in_model = train_model(self.eps, in_data, self.device)
-            in_model.to('cpu')
+            in_model = in_model.to('cpu')
 
             out_model = train_model(self.eps, out_data, self.device)
-            out_model.to('cpu')
+            out_model = out_model.to('cpu')
 
             # calculate confidence
             self.calc_confidence(in_model, out_model)
+            del in_model
+            del out_model
 
+    def attack(self, model):
+        """
+        The function implement LiRA attack.
+        :return:
+        """
+        torch.cuda.empty_cache()
         # calculate expectation and variance of the confidence of the sample, for the in models and out models.
         mean_in = np.mean(self.confs_in)
         mean_out = np.mean(self.confs_out)
@@ -117,14 +126,18 @@ class LiRA:
         # calculate confidence of the sample of the attacked model
         sample_tensor = torch.tensor(self.sample, dtype=torch.float32)
         sample_tensor = torch.permute(sample_tensor, (0, 3, 1, 2))
-        sample_tensor.to('cpu')
-        self.model.to('cpu')
-        model_confs = self.model(sample_tensor)
+        sample_tensor = sample_tensor.to('cpu')
+        model = model.to('cpu')
+        model_confs = model(sample_tensor)
         model_confs = F.softmax(model_confs, dim=1)
         model_confs = model_confs[0][self.label].item()
         if model_confs == 1:
-            model_confs = 0.9999999999
-        model_confs = np.log(model_confs / (1 - model_confs))
+            model_confs = 36.7368005696771
+        elif model_confs == 0:
+            model_confs = -36.841361487904734
+        else:
+            model_confs = np.log(model_confs / (1 - model_confs))
+        torch.cuda.empty_cache()
 
         # return likelihood ratio test
         return norm.pdf(model_confs, mean_in, var_in) / (norm.pdf(model_confs, mean_out, var_out))
