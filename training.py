@@ -2,20 +2,15 @@
 import torch
 from opacus.validators import ModuleValidator
 from torchvision import models
+
 # import models
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from opacus.utils.batch_memory_manager import BatchMemoryManager
-# from tqdm.notebook import tqdm
 from tqdm import tqdm
 from opacus import PrivacyEngine
 
-MAX_GRAD_NORM = 1.2
-EPSILON = 50.0
-DELTA = 1e-5
-EPOCHS = 10
-LR = 0.001
 
 def create_model(modelName="resnet18"):
     model = models.resnet18(num_classes=10)
@@ -29,50 +24,42 @@ def create_model(modelName="resnet18"):
     model = model.to(device)
     return model
 
-def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_size=128, modelName="resnet18"):
+
+def train_model(epsilon, train_data_loader, batch_size=512, max_physical_batch_size=128,
+                modelName="resnet18", max_grad_norm=1.2, epochs=10, lr=0.001, delta=1e-5):
     """
     The function train ResNet model, with epsilon-DP.
     :param epsilon:
     :param data:
     :return:
     """
-    # Data handel
-    # # Calculate the number of samples for 2% of the data
-    # subset_length = round(0.01 * len(train_data_loader))
-    # # Create a random permutation of indices and slice the first 2%
-    # indices = torch.randperm(len(train_data_loader))[:subset_length]
-    #
-    # # Use these indices to create the subset
-    # train_dataset = torch.utils.data.Subset(train_data_loader, indices)
-    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, )
-
     # Model handel
 
     model = create_model(modelName=modelName)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    optimizer = optim.Adam(model.parameters(), lr=LR)  # consider changing to adam
+    optimizer = optim.Adam(model.parameters(), lr=lr)  # consider changing to adam
 
     privacy_engine = PrivacyEngine()
     model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
         module=model,
         optimizer=optimizer,
         data_loader=train_data_loader,
-        epochs=EPOCHS,
+        epochs=epochs,
         target_epsilon=epsilon,
-        target_delta=DELTA,
-        max_grad_norm=MAX_GRAD_NORM,
+        target_delta=delta,
+        max_grad_norm=max_grad_norm,
     )
 
-    for epoch in tqdm(range(EPOCHS)):#, desc="Epoch", unit="epoch"):
-        train(model, train_loader, optimizer, epoch + 1, device, privacy_engine, batch_size, max_physical_batch_size)
+    for epoch in tqdm(range(epochs)):
+        train(model, train_loader, optimizer, epoch + 1, device, privacy_engine, batch_size, max_physical_batch_size, delta)
 
     del privacy_engine
-    print(f"Using sigma={optimizer.noise_multiplier} and C={MAX_GRAD_NORM}")
+    print(f"Using sigma={optimizer.noise_multiplier} and C={max_grad_norm}")
     return model
 
 
-def train(model, train_loader, optimizer, epoch, device, privacy_engine, batch_size=512, max_physical_batch_size=128):
+def train(model, train_loader, optimizer, epoch, device, privacy_engine, batch_size, max_physical_batch_size, delta):
     model.train()
     criterion = nn.CrossEntropyLoss()
 
@@ -108,12 +95,12 @@ def train(model, train_loader, optimizer, epoch, device, privacy_engine, batch_s
             optimizer.step()
 
             if (i + 1) % 200 == 0:
-                epsilon = privacy_engine.get_epsilon(DELTA)
+                epsilon = privacy_engine.get_epsilon(delta=delta)
                 print(
                     f"\tTrain Epoch: {epoch} \t"
                     f"Loss: {np.mean(losses):.6f} "
                     f"Acc@1: {np.mean(top1_acc) * 100:.6f} "
-                    f"(ε = {epsilon:.2f}, δ = {DELTA})"
+                    f"(ε = {epsilon:.2f}, δ = {delta})"
                 )
 
 

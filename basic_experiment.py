@@ -15,12 +15,17 @@ import os
 class BASIC_EXPERIEMENT:
 
     def __init__(self, eps, ensemble_size, number_of_samples=1000, batch_size=128,
-                 max_physical_batch_size=128):
+                 max_physical_batch_size=128, max_grad_norm=1.2, delta=1e-5,
+                 epochs=10, lr=0.001):
         self.eps = eps
         self.ensemble_size = ensemble_size
         self.number_of_samples = number_of_samples
         self.batch_size = batch_size
         self.max_physical_batch_size = max_physical_batch_size
+        self.max_grad_norm = max_grad_norm
+        self.delta = delta
+        self.epochs = epochs
+        self.lr = lr
         self.train_data = None
         self.test_data = None
         self.train_dataset = None
@@ -49,9 +54,9 @@ class BASIC_EXPERIEMENT:
 
             else:
                 # Train model
+                self.save_config(f"./saved_models/{identifier}_config.json")
                 model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size, modelName=model_name)
                 self.save_model_weights(model, identifier, i)
-                self.save_config(f"./saved_models/{identifier}_config.json")
 
             self.load_config(f"./saved_models/{identifier}_config.json")
             self.ensemble.append(model)
@@ -128,11 +133,16 @@ class BASIC_EXPERIEMENT:
         plt.savefig("fprtpr_" + evaluate_score + "_size_of_ensemble_" + str(self.ensemble_size) + ".png")
         plt.show()
 
+    def seed_rng(self):
+        torch.manual_seed(self.split_seed)
+        np.random.seed(self.split_seed)
+
     def make_experiment(self, evaluate_score):
         """
         The function make the experiment and produce ROC curve.
         :return:
         """
+        self.seed_rng()
         y_true = ([1] * self.number_of_samples) + ([0] * self.number_of_samples)
         y_score = []
         for i in range(self.number_of_samples):
@@ -153,8 +163,13 @@ class BASIC_EXPERIEMENT:
             'ensemble_size': self.ensemble_size,
             'batch_size': self.batch_size,
             'max_physical_batch_size': self.max_physical_batch_size,
+            'max_grad_norm': self.max_grad_norm,
+            'delta': self.delta,
+            'epochs': self.epochs,
+            'lr': self.lr,
             'split_seed': self.split_seed
         }
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as f:
             json.dump(config, f)
 
@@ -169,6 +184,7 @@ class BASIC_EXPERIEMENT:
 
     def save_model_weights(self, model, identifier, idx):
         path = f"./saved_models/{identifier}_model_{idx}.pth"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save(model.state_dict(), path)
 
     def load_model_weights(self, model, identifier, idx):
