@@ -3,18 +3,23 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from collections import OrderedDict
 import torchvision
 import torchvision.transforms as transforms
 from sklearn.metrics import roc_curve, auc
+from art.attacks.inference.membership_inference import LabelOnlyDecisionBoundary
+from art.estimators.classification.pytorch import PyTorchClassifier
+import torch.optim as optim
+from torch import nn
 
-from label_attack import MembershipInfernceAttack
-from training import train_model, testModel
+from training import train_model, testModel, create_model
 import os
 
+THRESHOLD_PATH = "threshold/"
 
 class BASIC_EXPERIEMENT:
 
-    def __init__(self, eps, ensemble_size, number_of_samples=1000, batch_size=128,
+    def __init__(self, eps, ensemble_size, attack_threshold, number_of_samples=1000, batch_size=64,
                  max_physical_batch_size=128, max_grad_norm=1.2, delta=1e-5,
                  epochs=10, lr=0.001):
         self.eps = eps
@@ -30,13 +35,16 @@ class BASIC_EXPERIEMENT:
         self.test_data = None
         self.train_dataset = None
         self.test_dataset = None
+        self.attack_train_size = 1500
+        self.attack_test_size = 1500
+        self.attack_threshold = attack_threshold
         self.ensemble = []
         self.ensemble_attacks = []
-        self.evaluate = {"average": self.check_average, "max": self.check_max}
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.split_seed = np.random.randint(0, 2 ** 31 - 1)
 
     def train_models(self):
+
         """
         Train n models to be epsilon-DP, using the same training set for all models.
         :param epsilon:
@@ -46,16 +54,18 @@ class BASIC_EXPERIEMENT:
         data_name = "CIFAR10"
 
         for i in range(self.ensemble_size):
-            identifier = self.generate_model_identifier(self.eps, self.ensemble_size, self.batch_size, model_name, data_name)
+            identifier = self.generate_model_identifier(self.eps, self.ensemble_size, self.batch_size, model_name,
+                                                        data_name)
 
             if self.model_exists(identifier, i):
                 # Load model and config
-                model = self.load_model_weights(train_model(self.eps, None, None, None, modelName=model_name), identifier, i)
+                model = self.load_model_weights(create_model(), identifier, i)
 
             else:
                 # Train model
                 self.save_config(f"./saved_models/{identifier}_config.json")
-                model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size, modelName=model_name)
+                model = train_model(self.eps, self.train_data, self.batch_size, self.max_physical_batch_size,
+                                    modelName=model_name)
                 self.save_model_weights(model, identifier, i)
 
             self.load_config(f"./saved_models/{identifier}_config.json")
@@ -64,27 +74,46 @@ class BASIC_EXPERIEMENT:
             acc = testModel(model, self.test_data, device=self.device)
             print("model", i + 1, "accuracy: ", acc)
 
-    def prepare_attack(self):
-        for model in self.ensemble:
-            attack = MembershipInfernceAttack(model, self.device)
-            attack.fit(True)
-            self.ensemble_attacks.append(attack)
+    def convert_x_sample(self, x):
+        x = torch.from_numpy(x)
+        x = torch.permute(x, (0, 3, 1, 2))
+        return torch.Tensor.numpy(x)
 
-    def check_average(self, x_sample, y_sample):
+    def prepare_attack(self):
+        x_train = self.train_dataset.dataset.data[1:self.attack_train_size]
+        x_train = self.convert_x_sample(x_train)
+        x_test = self.test_dataset.dataset.data[1:self.attack_test_size]
+        x_test = self.convert_x_sample(x_test)
+        y_train = np.ndarray(shape=(self.attack_train_size - 1,), offset=np.float_().itemsize, dtype=float,
+                             buffer=np.array(self.train_dataset.dataset.targets[:self.attack_train_size]))
+        y_test = np.ndarray(shape=(self.attack_train_size - 1,), offset=np.float_().itemsize, dtype=float,
+                            buffer=np.array(self.test_dataset.dataset.targets[:self.attack_test_size]))
+        file_name = f"{self.eps}_{self.ensemble_size}"
+        file_path = os.path.join(THRESHOLD_PATH, file_name)
+
+        for model in self.ensemble:
+            art_model = PyTorchClassifier(model, loss=nn.CrossEntropyLoss(), optimizer=optim.Adam(model.parameters()),
+                                          channels_first=True, input_shape=(3, 32, 32,), nb_classes=10)
+            self.ensemble_attacks.append(LabelOnlyDecisionBoundary(art_model))
+            if len(self.attack_threshold) < len(self.ensemble_attacks):
+                self.ensemble_attacks[-1].calibrate_distance_threshold\
+                    (x_train, y_train, x_test, y_test)
+                with open(file_path, 'w') as file:
+                    file.write(str(self.ensemble_attacks[-1].distance_threshold_tau) + "\n")
+
+            else:
+                self.ensemble_attacks[-1].distance_threshold_tau = self.attack_threshold[len(self.ensemble_attacks) - 1]
+
+    def attack(self, x_sample, y_sample):
         """
         This experiment check the basic attack when take the average of the attack of the models.
         :return:
         """
         res = []
         for i in range(len(self.ensemble)):
-            res.append(self.ensemble_attacks[i].attack(x_sample, y_sample))
-        return np.mean(res)
-
-    def check_max(self, x_sample, y_sample):
-        res = []
-        for i in range(len(self.ensemble)):
-            res.append(self.ensemble_attacks[i].attack(x_sample, y_sample))
-        return np.max(res)
+            prob = self.ensemble_attacks[i].infer(x_sample, y_sample, probabilities=True)
+            res.append(prob[0][1])
+        return np.max(res), np.mean(res)
 
     def get_CIFAR_ten(self):
         """
@@ -110,51 +139,42 @@ class BASIC_EXPERIEMENT:
         test_size = total_size - train_size
 
         # Split the dataset into training and testing sets
-        self.train_dataset, self.test_dataset = torch.utils.data.random_split(full_train_dataset, [train_size, test_size])
+        self.train_dataset, self.test_dataset = torch.utils.data.random_split(full_train_dataset,
+                                                                              [train_size, test_size])
 
         self.train_data = torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size)
         self.test_data = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, )
-
-    def plot_ROC_curve(self, fpr, tpr, evaluate_score):
-        # Compute the AUC (Area Under the Curve)
-        roc_auc = auc(fpr, tpr)
-        # Plot the ROC curve
-        plt.figure(figsize=(8, 6))
-        plt.plot(fpr, tpr, color='blue', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
-        plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
-        plt.semilogx()
-        plt.semilogy()
-        plt.xlim(1e-5, 1)
-        plt.ylim(1e-5, 1)
-        plt.xlabel('False Positive Rate (FPR)')
-        plt.ylabel('True Positive Rate (TPR)')
-        plt.title('ROC Curve')
-        plt.legend(loc='lower right')
-        plt.savefig("fprtpr_" + evaluate_score + "_size_of_ensemble_" + str(self.ensemble_size) + ".png")
-        plt.show()
 
     def seed_rng(self):
         torch.manual_seed(self.split_seed)
         np.random.seed(self.split_seed)
 
-    def make_experiment(self, evaluate_score):
+    def make_experiment(self):
         """
         The function make the experiment and produce ROC curve.
         :return:
         """
         self.seed_rng()
-        y_true = ([1] * self.number_of_samples) + ([0] * self.number_of_samples)
-        y_score = []
+        y_average = []
+        y_max = []
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
-            y_score.append(self.evaluate[evaluate_score](x_sample, np.ndarray(y_sample, dtype=float)))
+            y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize, dtype=float)
+            m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
+            y_average.append(a)
+            y_max.append(m)
 
         for i in range(self.number_of_samples):
             x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
-            y_score.append(self.evaluate[evaluate_score](x_sample, np.ndarray(y_sample, dtype=float)))
-        print(self.ensemble_size, "\t", y_score)
-        fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
-        self.plot_ROC_curve(fpr, tpr, evaluate_score)
+            y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize, dtype=float)
+            m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
+            y_average.append(a)
+            y_max.append(m)
+
+        if self.ensemble_size > 1:
+            return y_average, y_max
+        else:
+            return y_max
 
     def save_config(self, path):
         config = {
@@ -185,39 +205,107 @@ class BASIC_EXPERIEMENT:
     def save_model_weights(self, model, identifier, idx):
         path = f"./saved_models/{identifier}_model_{idx}.pth"
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        torch.save(model.state_dict(), path)
+        torch.save(model._module.state_dict(), path)
 
     def load_model_weights(self, model, identifier, idx):
         path = f"./saved_models/{identifier}_model_{idx}.pth"
-        model.load_state_dict(torch.load(path))
+        d = OrderedDict()
+        for k, v in torch.load(path, map_location=self.device).items():
+            if k[:8] == "_module.":
+                d[k[8:]] = v
+            else:
+                d[k] = v
+        model.load_state_dict(d)
         model.eval()  # Set model to evaluation mode
         return model
 
     def model_exists(self, identifier, idx):
         return os.path.exists(f"./saved_models/{identifier}_model_{idx}.pth")
 
+def plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, number_of_samples):
+    plt.figure(figsize=(8, 6))
+    y_true = ([1] * number_of_samples) + ([0] * number_of_samples)
+    # plot average roc curve
+    fpr_a, tpr_a, thresholds_a = roc_curve(y_true, y_average, pos_label=1)
+    roc_auc_a = auc(fpr_a, tpr_a)
+    plt.plot(fpr_a, tpr_a, color='b', lw=2, label=f'average (AUC = {roc_auc_a:.2f})')
+    # plot max roc curve
+    fpr_m, tpr_m, thresholds_m = roc_curve(y_true, y_max, pos_label=1)
+    roc_auc_m = auc(fpr_m, tpr_m)
+    plt.plot(fpr_m, tpr_m, color='g', lw=2, label=f'max (AUC = {roc_auc_m:.2f})')
+    # plot single model roc curve
+    fpr_s, tpr_s, thresholds_s = roc_curve(y_true, y_single, pos_label=1)
+    roc_auc_s = auc(fpr_s, tpr_s)
+    plt.plot(fpr_s, tpr_s, color='r', lw=2, label=f'single model (AUC = {roc_auc_s:.2f})')
+
+    # Plot the ROC curve
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
+    plt.xlim([0, 1])
+    plt.ylim([0, 1])
+    plt.xlabel('False Positive Rate (FPR)')
+    plt.ylabel('True Positive Rate (TPR)')
+    plt.title('ROC Curve')
+    plt.legend(loc='lower right')
+    plt.savefig("epsilon_" + str(eps) + "_size_of_ensemble_" + str(ensemble_size) + ".png")
+    plt.show()
+
+def manage_threshold(eps, ensemble_size):
+    file_name = f"{eps}_{ensemble_size}"
+    file_path = os.path.join(THRESHOLD_PATH, file_name)
+
+    if os.path.exists(file_path):
+        res = []
+        with open(file_path, 'r') as file:
+            for line in file:
+                if line != "\n":
+                    res.append((float(line)))
+        return res
+    else:
+        return []
+
 
 def run_experiment(eps, ensemble_size):
-    exp = BASIC_EXPERIEMENT(eps=eps, ensemble_size=ensemble_size)
+    attack_threshold = manage_threshold(eps, ensemble_size)
+    exp1 = BASIC_EXPERIEMENT(eps=eps, ensemble_size=ensemble_size, attack_threshold=attack_threshold)
+    identifier = exp1.generate_model_identifier(exp1.eps, exp1.ensemble_size, exp1.batch_size, "resnet18", "CIFAR10")
+    if exp1.model_exists(identifier, 0):
+        exp1.load_config(f"./saved_models/{identifier}_config.json")
 
-    exp.get_CIFAR_ten()
+    exp1.get_CIFAR_ten()
     print("train ", ensemble_size, "\n")
 
-    exp.train_models()
+    exp1.train_models()
     print("prepare attack ", ensemble_size, "\n")
 
-    exp.prepare_attack()
+    exp1.prepare_attack()
     print("attack ", ensemble_size, "\n")
-    exp.make_experiment("average")
-    exp.make_experiment("max")
+    y_average, y_max = exp1.make_experiment()
+
+    attack_threshold = manage_threshold((eps * ensemble_size), 1)
+    exp2 = BASIC_EXPERIEMENT(eps=(eps * ensemble_size), ensemble_size=1, attack_threshold=attack_threshold)
+    identifier = exp2.generate_model_identifier(exp2.eps, exp2.ensemble_size, exp2.batch_size, "resnet18", "CIFAR10")
+    if exp2.model_exists(identifier, 0):
+        exp2.load_config(f"./saved_models/{identifier}_config.json")
+
+    exp2.get_CIFAR_ten()
+    print("train ", ensemble_size, "\n")
+
+    exp2.train_models()
+    print("prepare attack ", ensemble_size, "\n")
+
+    exp2.prepare_attack()
+    print("attack ", ensemble_size, "\n")
+    y_single = exp2.make_experiment()
+
+    print(y_average, "\n", y_max, "\n", y_single)
+
+    plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, exp1.number_of_samples)
+
+
+
 
 
 if __name__ == '__main__':
     epsilon = 8
     n = 2
-
-    # Train and attack: 2*epsilon-DP model
-    run_experiment(epsilon, 1)
-
-    # Train and attack ensemble of 2: epsilon-DP model
-    run_experiment(epsilon / 2, n)
+    run_experiment(epsilon, n)
