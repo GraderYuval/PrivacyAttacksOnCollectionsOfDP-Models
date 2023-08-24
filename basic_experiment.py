@@ -16,6 +16,7 @@ from training import train_model, testModel, create_model
 import os
 
 THRESHOLD_PATH = "threshold/"
+RESULTS_PATH = "results/"
 
 class BASIC_EXPERIEMENT:
 
@@ -98,7 +99,7 @@ class BASIC_EXPERIEMENT:
             if len(self.attack_threshold) < len(self.ensemble_attacks):
                 self.ensemble_attacks[-1].calibrate_distance_threshold\
                     (x_train, y_train, x_test, y_test)
-                with open(file_path, 'w') as file:
+                with open(file_path, 'a') as file:
                     file.write(str(self.ensemble_attacks[-1].distance_threshold_tau) + "\n")
 
             else:
@@ -149,27 +150,61 @@ class BASIC_EXPERIEMENT:
         torch.manual_seed(self.split_seed)
         np.random.seed(self.split_seed)
 
+    def read_results_from_file(self):
+        y_average = []
+        y_max = []
+
+        file_name_average = f"results_eps_{self.eps}_ensemble_{self.ensemble_size}_average"
+        file_path_average = os.path.join(RESULTS_PATH, file_name_average)
+        if os.path.exists(file_path_average):
+            with open(file_path_average, 'r') as file:
+                for line in file:
+                    if line != "\n":
+                        y_average.append(float(line))
+
+        file_name_max = f"results_eps_{self.eps}_ensemble_{self.ensemble_size}_max"
+        file_path_max = os.path.join(RESULTS_PATH, file_name_max)
+        if os.path.exists(file_path_max):
+            with open(file_path_max, 'r') as file:
+                for line in file:
+                    if line != "\n":
+                        y_max.append(float(line))
+        return y_average, y_max
     def make_experiment(self):
         """
         The function make the experiment and produce ROC curve.
         :return:
         """
+        file_name_average = f"results_eps_{self.eps}_ensemble_{self.ensemble_size}_average"
+        file_path_average = os.path.join(RESULTS_PATH, file_name_average)
+        file_name_max = f"results_eps_{self.eps}_ensemble_{self.ensemble_size}_max"
+        file_path_max = os.path.join(RESULTS_PATH, file_name_max)
         self.seed_rng()
-        y_average = []
-        y_max = []
-        for i in range(self.number_of_samples):
-            x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
-            y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize, dtype=float)
-            m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
-            y_average.append(a)
-            y_max.append(m)
+        y_average, y_max = self.read_results_from_file()
+        with open(file_path_average, 'a') as file_average, open(file_path_max, 'a') as file_max:
+            for i in range(self.number_of_samples):
+                x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
+                if i < len(y_average):
+                    continue
+                y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize,
+                                      dtype=float)
+                m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
+                y_average.append(a)
+                y_max.append(m)
+                file_average.write(str(a) + "\n")
+                file_max.write(str(m) + "\n")
 
-        for i in range(self.number_of_samples):
-            x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
-            y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize, dtype=float)
-            m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
-            y_average.append(a)
-            y_max.append(m)
+            for i in range(self.number_of_samples):
+                x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
+                if (i + self.number_of_samples) < len(y_average):
+                    continue
+                y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize,
+                                      dtype=float)
+                m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
+                y_average.append(a)
+                y_max.append(m)
+                file_average.write(str(a) + "\n")
+                file_max.write(str(m) + "\n")
 
         if self.ensemble_size > 1:
             return y_average, y_max
@@ -244,9 +279,9 @@ def plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, number_of_sam
     plt.ylim([0, 1])
     plt.xlabel('False Positive Rate (FPR)')
     plt.ylabel('True Positive Rate (TPR)')
-    plt.title('ROC Curve')
+    plt.title(f"ROC Curve epsilon - {eps} ensemble of - {ensemble_size}")
     plt.legend(loc='lower right')
-    plt.savefig("epsilon_" + str(eps) + "_size_of_ensemble_" + str(ensemble_size) + ".png")
+    plt.savefig(f"epsilon_{eps}_size_of_ensemble_{ensemble_size}.png")
     plt.show()
 
 def manage_threshold(eps, ensemble_size):
@@ -288,16 +323,14 @@ def run_experiment(eps, ensemble_size):
         exp2.load_config(f"./saved_models/{identifier}_config.json")
 
     exp2.get_CIFAR_ten()
-    print("train ", ensemble_size, "\n")
+    print("train 1\n")
 
     exp2.train_models()
-    print("prepare attack ", ensemble_size, "\n")
+    print("prepare attack 1\n")
 
     exp2.prepare_attack()
-    print("attack ", ensemble_size, "\n")
+    print("attack 1\n")
     y_single = exp2.make_experiment()
-
-    print(y_average, "\n", y_max, "\n", y_single)
 
     plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, exp1.number_of_samples)
 
