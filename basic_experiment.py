@@ -303,11 +303,30 @@ class BASIC_EXPERIEMENT:
         return os.path.exists(f"./saved_models/{identifier}_model_{idx}.pth")
 
     def prepare_attack_individual_model(self):
+        x_train = self.train_dataset.dataset.data[1:self.attack_train_size]
+        x_train = self.convert_x_sample(x_train)
+        x_test = self.test_dataset.dataset.data[1:self.attack_test_size]
+        x_test = self.convert_x_sample(x_test)
+        y_train = np.ndarray(shape=(self.attack_train_size - 1,), offset=np.float_().itemsize, dtype=float,
+                             buffer=np.array(self.train_dataset.dataset.targets[:self.attack_train_size]))
+        y_test = np.ndarray(shape=(self.attack_train_size - 1,), offset=np.float_().itemsize, dtype=float,
+                            buffer=np.array(self.test_dataset.dataset.targets[:self.attack_test_size]))
+        file_name = f"{self.eps}_{self.ensemble_size}"
+        file_path = os.path.join(THRESHOLD_PATH, file_name)
+
         for i in range(self.ensemble_size):
             model = self.ensemble[i]
             art_model = PyTorchClassifier(model, loss=nn.CrossEntropyLoss(), optimizer=optim.Adam(model.parameters()),
                                           channels_first=True, input_shape=(3, 32, 32,), nb_classes=10)
-            self.ensemble_attacks.append(Attack(art_model, self.attack_threshold[i]))
+            self.ensemble_attacks.append(Attack(art_model))
+            if len(self.attack_threshold) < len(self.ensemble_attacks):
+                self.ensemble_attacks[-1].calibrate_distance_threshold \
+                    (x_train, y_train, x_test, y_test)
+                with open(file_path, 'a') as file:
+                    file.write(str(self.ensemble_attacks[-1].distance_threshold_tau) + "\n")
+
+            else:
+                self.ensemble_attacks[-1].distance_threshold_tau = self.attack_threshold[len(self.ensemble_attacks) - 1]
 
     def write_to_files(self, indic, prob, file_path_inidic, file_path_prob):
         with open(file_path_inidic, 'a') as file_indic, open(file_path_prob, 'a') as file_prob:
