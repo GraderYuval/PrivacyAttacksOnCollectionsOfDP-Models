@@ -11,12 +11,14 @@ from art.attacks.inference.membership_inference import LabelOnlyDecisionBoundary
 from art.estimators.classification.pytorch import PyTorchClassifier
 import torch.optim as optim
 from torch import nn
+from Attack import Attack
 
 from training import train_model, testModel, create_model
 import os
 
 THRESHOLD_PATH = "threshold/"
 RESULTS_PATH = "results/"
+INDIVIDUAL_RESULTS_PATH = "models_results/"
 
 class BASIC_EXPERIEMENT:
 
@@ -181,28 +183,29 @@ class BASIC_EXPERIEMENT:
         file_path_max = os.path.join(RESULTS_PATH, file_name_max)
         self.seed_rng()
         y_average, y_max = self.read_results_from_file()
-        with open(file_path_average, 'a') as file_average, open(file_path_max, 'a') as file_max:
-            for i in range(self.number_of_samples):
-                x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
-                if i < len(y_average):
-                    continue
-                y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize,
-                                      dtype=float)
-                m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
-                y_average.append(a)
-                y_max.append(m)
+        for i in range(self.number_of_samples):
+            x_sample, y_sample = self.train_dataset[torch.randint(len(self.train_dataset), size=(1,)).item()]
+            if i < len(y_average):
+                continue
+            y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize,
+                                  dtype=float)
+            m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
+            y_average.append(a)
+            y_max.append(m)
+            with open(file_path_average, 'a') as file_average, open(file_path_max, 'a') as file_max:
                 file_average.write(str(a) + "\n")
                 file_max.write(str(m) + "\n")
 
-            for i in range(self.number_of_samples):
-                x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
-                if (i + self.number_of_samples) < len(y_average):
-                    continue
-                y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize,
-                                      dtype=float)
-                m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
-                y_average.append(a)
-                y_max.append(m)
+        for i in range(self.number_of_samples):
+            x_sample, y_sample = self.test_dataset[torch.randint(len(self.test_dataset), size=(1,)).item()]
+            if (i + self.number_of_samples) < len(y_average):
+                continue
+            y_sample = np.ndarray(shape=(1,), buffer=np.array([0., y_sample]), offset=np.float_().itemsize,
+                                  dtype=float)
+            m, a = self.attack(torch.Tensor.numpy(torch.unsqueeze(x_sample, dim=0)), y_sample)
+            y_average.append(a)
+            y_max.append(m)
+            with open(file_path_average, 'a') as file_average, open(file_path_max, 'a') as file_max:
                 file_average.write(str(a) + "\n")
                 file_max.write(str(m) + "\n")
 
@@ -210,6 +213,48 @@ class BASIC_EXPERIEMENT:
             return y_average, y_max
         else:
             return y_max
+
+    def attack_individual_model(self):
+        d = {1: 0, 2: 0, 3: 2, 4: 5}
+        self.seed_rng()
+        for j in range(self.ensemble_size):
+            file_name_inidic = f"results_eps_{self.eps}_number_{j + d[self.ensemble_size]}_indicator_true"
+            file_name_prob = f"results_eps_{self.eps}_number_{j + d[self.ensemble_size]}_prob_true"
+            file_path_inidic = os.path.join(INDIVIDUAL_RESULTS_PATH, file_name_inidic)
+            file_path_prob = os.path.join(INDIVIDUAL_RESULTS_PATH, file_name_prob)
+            num_lines = 0
+            if os.path.exists(file_path_inidic):
+                with open(file_path_inidic, "r") as f:
+                    num_lines = sum(1 for _ in f)
+
+            for i, (x_sample, y_sample) in enumerate(self.train_data):
+                if i * self.batch_size > 1000:
+                    break
+                if i * self.batch_size < num_lines:
+                    continue
+                y_sample = torch.Tensor.numpy(y_sample)
+                x_sample = torch.Tensor.numpy(x_sample)
+                indic, prob = self.ensemble_attacks[j].infer(x_sample, y_sample)
+                self.write_to_files(indic, prob, file_path_inidic, file_path_prob)
+
+            file_name_inidic = f"results_eps_{self.eps}_number_{j + d[self.ensemble_size]}_indicator_false"
+            file_name_prob = f"results_eps_{self.eps}_number_{j + d[self.ensemble_size]}_prob_false"
+            file_path_inidic = os.path.join(INDIVIDUAL_RESULTS_PATH, file_name_inidic)
+            file_path_prob = os.path.join(INDIVIDUAL_RESULTS_PATH, file_name_prob)
+            num_lines = 0
+            if os.path.exists(file_path_inidic):
+                with open(file_path_inidic, "r") as f:
+                    num_lines = sum(1 for _ in f)
+
+            for i, (x_sample, y_sample) in enumerate(self.test_data):
+                if i * self.batch_size > 1000:
+                    break
+                if i * self.batch_size < num_lines:
+                    continue
+                y_sample = torch.Tensor.numpy(y_sample)
+                x_sample = torch.Tensor.numpy(x_sample)
+                indic, prob = self.ensemble_attacks[j].infer(x_sample, y_sample)
+                self.write_to_files(indic, prob, file_path_inidic, file_path_prob)
 
     def save_config(self, path):
         config = {
@@ -257,6 +302,19 @@ class BASIC_EXPERIEMENT:
     def model_exists(self, identifier, idx):
         return os.path.exists(f"./saved_models/{identifier}_model_{idx}.pth")
 
+    def prepare_attack_individual_model(self):
+        for i in range(self.ensemble_size):
+            model = self.ensemble[i]
+            art_model = PyTorchClassifier(model, loss=nn.CrossEntropyLoss(), optimizer=optim.Adam(model.parameters()),
+                                          channels_first=True, input_shape=(3, 32, 32,), nb_classes=10)
+            self.ensemble_attacks.append(Attack(art_model, self.attack_threshold[i]))
+
+    def write_to_files(self, indic, prob, file_path_inidic, file_path_prob):
+        with open(file_path_inidic, 'a') as file_indic, open(file_path_prob, 'a') as file_prob:
+            for i in range(len(indic)):
+                file_indic.write(str(indic[i]) + "\n")
+                file_prob.write(str(prob[i]) + "\n")
+
 def plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, number_of_samples):
     plt.figure(figsize=(8, 6))
     y_true = ([1] * number_of_samples) + ([0] * number_of_samples)
@@ -281,7 +339,7 @@ def plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, number_of_sam
     plt.ylabel('True Positive Rate (TPR)')
     plt.title(f"ROC Curve epsilon - {eps} ensemble of - {ensemble_size}")
     plt.legend(loc='lower right')
-    plt.savefig(f"epsilon_{eps}_size_of_ensemble_{ensemble_size}.png")
+    # plt.savefig(f"epsilon_{eps}_size_of_ensemble_{ensemble_size}.png")
     plt.show()
 
 def manage_threshold(eps, ensemble_size):
@@ -334,11 +392,45 @@ def run_experiment(eps, ensemble_size):
 
     plot_ROC_curve(y_average, y_max, y_single, eps, ensemble_size, exp1.number_of_samples)
 
+def check_individual_model_results(eps, ensemble_size):
+    attack_threshold = manage_threshold(eps, ensemble_size)
+    exp1 = BASIC_EXPERIEMENT(eps=eps, ensemble_size=ensemble_size, attack_threshold=attack_threshold)
+    identifier = exp1.generate_model_identifier(exp1.eps, exp1.ensemble_size, exp1.batch_size, "resnet18", "CIFAR10")
+    if exp1.model_exists(identifier, 0):
+        exp1.load_config(f"./saved_models/{identifier}_config.json")
+
+    exp1.get_CIFAR_ten()
+    print("train ", ensemble_size, "\n")
+
+    exp1.train_models()
+    print("prepare attack ", ensemble_size, "\n")
+
+    exp1.prepare_attack_individual_model()
+
+    print("attack")
+    exp1.attack_individual_model()
+
+    attack_threshold = manage_threshold((eps * ensemble_size), 1)
+    exp2 = BASIC_EXPERIEMENT(eps=(eps * ensemble_size), ensemble_size=1, attack_threshold=attack_threshold)
+    identifier = exp2.generate_model_identifier(exp2.eps, exp2.ensemble_size, exp2.batch_size, "resnet18", "CIFAR10")
+    if exp2.model_exists(identifier, 0):
+        exp2.load_config(f"./saved_models/{identifier}_config.json")
+
+    exp2.get_CIFAR_ten()
+
+    print("train 1\n")
+    exp2.train_models()
+
+    print("prepare attack 1\n")
+    exp2.prepare_attack_individual_model()
+
+    print("attack 1\n")
+    exp2.attack_individual_model()
 
 
 
 
 if __name__ == '__main__':
-    epsilon = 8
-    n = 2
-    run_experiment(epsilon, n)
+    epsilon = 2
+    n = 4
+    check_individual_model_results(epsilon, n)
