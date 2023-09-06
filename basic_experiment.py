@@ -134,6 +134,8 @@ class BASIC_EXPERIEMENT:
 
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD_DEV), ])
 
+        '''
+        NADAV
         full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 
         # Calculate the size of the dataset
@@ -147,6 +149,26 @@ class BASIC_EXPERIEMENT:
 
         self.train_data = torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size)
         self.test_data = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, )
+        '''
+        self.train_dataset = torchvision.datasets.CIFAR10(
+            root='./data', train=True, download=True, transform=transform)
+
+
+        self.train_data = torch.utils.data.DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+        )
+
+
+        self.test_dataset = torchvision.datasets.CIFAR10(
+            root='./data', train=False, download=True, transform=transform)
+
+        self.test_data = torch.utils.data.DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+        )
+
 
     def seed_rng(self):
         torch.manual_seed(self.split_seed)
@@ -431,6 +453,6 @@ def check_individual_model_results(eps, ensemble_size):
 
 
 if __name__ == '__main__':
-    epsilon = 2
-    n = 4
-    check_individual_model_results(epsilon, n)
+    epsilon = 8
+    n = 2
+    run_experiment(epsilon, n)
