@@ -10,7 +10,7 @@ from art.estimators.classification.pytorch import PyTorchClassifier
 import torch.optim as optim
 from torch import nn
 
-from training import train_model, create_model
+from training import train_model, create_model, testModel
 import os
 
 THRESHOLD_PATH = "threshold/"
