@@ -18,15 +18,11 @@ pip install -r requirements.txt
 
 ### Run Experiment
 
-To run the experiment, you need to call the ```run_experiment()``` function from ```experiment.py```. The function takes two arguments: the ensemble size and the epsilon. For example, to run an experiment with an ensemble size of 3 and an epsilon of 2, you would run the following command:
-
-```
-python experiment.py --ensemble_size 3 --epsilon 2
-```
+To run the experiment, you need to call the ```run_experiment()``` function from ```experiment.py```. The function takes two arguments: the ensemble size and the epsilon. 
 
 ### Plot Results
 
-To plot the results of the experiments, you need to call the ```plot_results()``` function from ```plot_results.py```. The function takes one argument: a list of experiments. Each experiment is a dictionary with the keys epsilon and ensemble. For example, the following code plots the results of three experiments:
+To plot the results of the experiments, you need to call the ```plot_results()``` function from ```plot_results.py```. The function takes one argument: a list of experiments. Each experiment is a dictionary with the keys epsilon and ensemble, for example:
 
 ```
 experiments = [
@@ -43,8 +39,6 @@ experiments = [
         "ensemble": 3,
     },
 ]
-
-python plot_results.py --experiments experiments
 ```
 ### Example Experiments
 
